@@ -1,0 +1,5 @@
+name = Entity Reference Prepopulate Bridge
+description = "Provides integration with the entityreference_prepopulate module for custom forms."
+core = 7.x
+
+dependencies[] = entityreference_prepopulate

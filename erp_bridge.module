@@ -1,0 +1,143 @@
+<?php
+
+/**
+ * @file
+ * erp_bridge module.
+ * Provides integration with the entityreference_prepopulate module for custom
+ * forms.
+ */
+
+/**
+ * Prepopulates 'entityreference' Form API fields with values from the URL.
+ *
+ * This function has to be called from any form that wants 'entityreference'
+ * (or simple text fields) form API types to be prepopulated with references to
+ * a given entity based on certain values on the URL.
+ *
+ * Every entity that should be prepopulated from the URL, should be specied in
+ *
+ *    $form['#erp_bridge_fields'].
+ *
+ * That is an associative array keyed by the form API elements affected, and
+ * whose values are expected to be the following:
+ *
+ *   'target_type' => The entity type being referenced,
+ *   'entity_type' => The entity type from which the reference is made,
+ *   'bundle'      => Bundle from which the reference is made,
+ *   'target_bundles' => Array of target bundles (empty array for all of them),
+ *   'prepopulate_settings' => Array with any desired prepopulate settings,
+ *
+ * For an example of use and more documentation see README.txt
+ *
+ * @param $form
+ * @param $form_state
+ *
+ * @see entityreference_prepopulate_field_attach_form();
+ */
+function erp_bridge_prepopulate_form(&$form, &$form_state) {
+  foreach ($form['#erp_bridge_fields'] as $field_name => $settings) {
+    extract($settings);
+    // Make sure all the settings are included, in case they don't come manually
+    // specified.
+    $prepopulate_settings = array_merge(array(
+      'status' => 1,
+      'action' => 'disable',
+      'action_on_edit' => 1,
+      'fallback' => 'none',
+      // Not using these
+//      'skip_perm' => 0,
+//      'og_context' => 0,
+    ), $prepopulate_settings);
+
+    $field_ids = erp_bridge_get_field_values($field_name, $target_type, $entity_type, $bundle, $target_bundles, $prepopulate_settings);
+
+    if (!empty($field_ids)) {
+      // Set the values in form_state so they're available if form is cached,
+      // since entityreference_prepopulate_get_values() might try to retrieve
+      // them from there.
+      $form_state['entityreference_prepopulate'][$entity_type][$bundle][$field_name] = $field_ids;
+
+      // Set the ids returned as the default values for the current field.
+      // User access is checked in entityreference_prepopulate module already.
+      $form[$field_name]['#default_value'] = $field_ids;
+
+      if (!empty($prepopulate_settings['action_on_edit'])) {
+        // New entity with prepopualte values, or an existing entity,
+        if ($prepopulate_settings['action'] == 'disable') {
+          $form[$field_name]['#disabled'] = TRUE;
+        }
+        elseif ($prepopulate_settings['action'] == 'hide') {
+          // We don't hide the field via hook_field_access(), as the
+          // default value won't be set.
+          $form[$field_name]['#access'] = FALSE;
+        }
+      }
+    }
+    elseif (in_array($prepopulate_settings['fallback'], array('form_error', 'redirect'))) {
+      $message = t('Field @label must be populated via URL.', array('@label' => $form[$field_name]['#title']));
+      if ($prepopulate_settings['fallback'] == 'form_error') {
+        form_error($form, $message);
+      }
+      elseif ($prepopulate_settings['fallback'] == 'redirect') {
+        drupal_set_message($message, 'notice');
+        drupal_goto();
+      }
+    }
+
+  }
+}
+
+/**
+ * Returns prepopulated values for a given field in a form.
+ *
+ * This function massages its arguments into the relevant variables that
+ * entityreference_prepopulate_get_values() expects in order to return an
+ * entity ID (or several) to be used as a prepopulated value in a form.
+ *
+ * @param $field_name
+ *   Name of the form field that will be prepopulated.
+ * @param $target_type
+ *   Type of entity being referenced.
+ * @param $entity_type
+ *   Type of entity from which the reference will be made.
+ * @param $bundle
+ *   Bundle of the entity from which the reference will be made.
+ * @param array $target_bundles
+ *   Bundle types that can be referenced.
+ * @param array $prepopulate_settings
+ *   Other settings used by entityreference_prepopulate module (see README).
+ * @return array
+ *   Array of values retrieved through entityreference_prepopulate for the
+ *   given field.
+ *
+ * @see entityreference_prepopulate_get_values().
+ */
+function erp_bridge_get_field_values($field_name, $target_type, $entity_type, $bundle, $target_bundles = array(), &$prepopulate_settings = array()) {
+  $instance = array(
+    'field_name' => $field_name,
+    'entity_type' => $entity_type,
+    'bundle' => $bundle,
+    'settings' => array(
+      'behaviors' => array(
+        'prepopulate' => $prepopulate_settings,
+      ),
+    ),
+  );
+
+  $field = array(
+    'field_name' => $field_name,
+    'type' => 'entityreference',
+    'settings' => array(
+      'target_type' => $target_type,
+      'handler' => 'base',
+      'handler_settings' => array(
+        'target_bundles' => $target_bundles,
+      ),
+    ),
+  );
+
+  if ($ids = entityreference_prepopulate_get_values($field, $instance)) {
+    return $ids;
+  }
+  return array();
+}
